@@ -12,17 +12,23 @@ const myDataSource = new DataSource({
 
 myDataSource.initialize();
 
-const validateToken = (req, res, next) => {
+const validateTokenForView = (req, res, next) => {
   // 인증 완료
   try {
-    // 요청 헤더에 저장된 토큰(req.headers.authorization)과 비밀키를 사용하여 토큰을 req.decoded에 반환
-    const verifiedToken = jwt.verify(req.headers.token, process.env.SECRET_KEY);
-    const user_id = verifiedToken.id;
-    req.user_id = user_id;
+    const token = req.headers.token;
+
+    // 토큰이 없는 비로그인 유저
+    if (token) {
+      const verifiedToken = jwt.verify(token, process.env.SECRET_KEY);
+      const user_id = verifiedToken.id;
+
+      req.user_id = user_id;
+    } else if (!token) {
+      next();
+    }
+
     next();
-  } catch (error) {
-    // 인증 실패
-    // 유효시간이 초과된 경우
+  } catch (err) {
     if (error.name === 'TokenExpiredError') {
       res.status(419).json({
         code: 419,
@@ -40,5 +46,5 @@ const validateToken = (req, res, next) => {
 };
 
 module.exports = {
-  validateToken,
+  validateTokenForView,
 };

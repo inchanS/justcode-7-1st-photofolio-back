@@ -8,25 +8,25 @@ const myDataSource = new DataSource({
   database: process.env.TYPEORM_DATABASE,
 });
 
-myDataSource.initialize().then(() => {
-  console.log('Data Source has been initialized!');
-});
+myDataSource.initialize();
 
 // 카테고리별 총 게시물 수 + 최신 feed list
-const worksList = async () => {
+const worksList = async sort => {
   try {
-    const categorySortCountList = await myDataSource.query(
-      `
+    console.log('sort is ', sort);
+    if (!sort) {
+      const categorySortCountList = await myDataSource.query(
+        `
     SELECT wc.id, wc.category_name, wc.eng_category_name, count(*) category_cnt 
     FROM Works_Category wc 
     LEFT JOIN Works_Posting wp 
     ON wc.id = wp.category_id 
     GROUP BY wc.id
     `
-    );
+      );
 
-    const worksFeedList = await myDataSource.query(
-      `
+      const worksFeedList = await myDataSource.query(
+        `
       with tables1 as (
         select wp.id as id, COUNT(*) as comment_cnt FROM Works_Posting wp 
         join Comment c on wp.id = c.posting_id 
@@ -42,7 +42,8 @@ const worksList = async () => {
         IN (select posting_id, MAX(id) from upload_file WHERE file_sort_id = 1 group by posting_id ) 
       ) 
     
-      SELECT wp.id, u.nickname, u.profile_image,  c.img_url, wp.title, IFNULL(a.comment_cnt, '0'), IFNULL(b.sympathy_cnt, '0'), wp.view_count, SUBSTRING(wp.created_at,1,10) as created_at
+      SELECT wp.id, u.nickname, u.profile_image,  c.img_url, wp.title, IFNULL(a.comment_cnt, '0') comment_cnt, 
+        IFNULL(b.sympathy_cnt, '0') sympathy_cnt, wp.view_count, SUBSTRING(wp.created_at,1,10) as created_at
       from Works_Posting wp 
       left join Users u on wp.user_id = u.id 
       left JOIN tables3 c on c.posting_id = wp.id
@@ -50,9 +51,49 @@ const worksList = async () => {
       left JOIN tables2 b on b.id = wp.id 
       ORDER BY wp.created_at DESC 
       `
-    );
-    let result = { categorySortCountList, worksFeedList };
-    return result;
+      );
+      let result = { categorySortCountList, worksFeedList };
+      return result;
+    } else {
+      const categorySortCountList = await myDataSource.query(
+        `
+      SELECT wc.id, wc.category_name, wc.eng_category_name, count(*) category_cnt 
+      FROM Works_Category wc 
+      LEFT JOIN Works_Posting wp 
+      ON wc.id = wp.category_id 
+      GROUP BY wc.id
+      `
+      );
+      // sort 종류 ('recommendpoint', 'sympathycnt')
+      const worksFeedList = await myDataSource.query(
+        `
+        with tables1 as (
+          select wp.id as id, COUNT(*) as comment_cnt FROM Works_Posting wp 
+          join Comment c on wp.id = c.posting_id 
+          GROUP BY wp.id 
+        ), tables2 as (
+          SELECT wp.id as id, COUNT(*) as sympathy_cnt from Works_Posting wp 
+          join Works_Sympathy_Count wsc on wp.id = wsc.posting_id 
+          left join Works_Sympathy ws on wsc.sympathy_id = ws.id 
+          GROUP BY wp.id 
+        ), tables3 as (
+          select id, posting_id, upload_url as img_url from upload_file
+          WHERE (posting_id, id) 
+          IN (select posting_id, MAX(id) from upload_file WHERE file_sort_id = 1 group by posting_id ) 
+        ) 
+        SELECT concat(b.sympathy_cnt + a.comment_cnt) recommendpoint, wp.id, u.nickname, u.profile_image,  c.img_url, wp.title, 
+          IFNULL(a.comment_cnt, '0') comment_cnt, IFNULL(b.sympathy_cnt, '0') sympathycnt, wp.view_count, SUBSTRING(wp.created_at,1,10) as created_at
+        from Works_Posting wp 
+        left join Users u on wp.user_id = u.id 
+        left JOIN tables3 c on c.posting_id = wp.id
+        left join tables1 a on a.id = wp.id 
+        left JOIN tables2 b on b.id = wp.id 
+        ORDER BY ${sort} DESC 
+        `
+      );
+      let result = { categorySortCountList, worksFeedList };
+      return result;
+    }
   } catch (err) {
     console.log(err);
     res.status(err.statusCode).json({ message: err.message });
@@ -79,6 +120,8 @@ const feed = async (id, user_id, userCookie) => {
       `
     );
     feedImgArr = [...feedImgArr].map(item => {
+      console.log(typeof item.fileInfo);
+      console.log(typeof item.file_cnt);
       return {
         ...item,
         fileInfo: JSON.parse(item.fileInfo),
@@ -131,7 +174,9 @@ const feed = async (id, user_id, userCookie) => {
     let moreFeedinfo = await myDataSource.query(
       `
       with tables1 as (
-        select id, posting_id, upload_url as img_url from upload_file
+        select id, posting_id, upload_url as img_url,
+        SUBSTRING(created_at,1,10) as created_at
+        from upload_file
         WHERE (posting_id, id) 
         IN (select posting_id, MAX(id) from upload_file WHERE file_sort_id = 1 group by posting_id ) 
       ), tables2 as (
@@ -139,20 +184,23 @@ const feed = async (id, user_id, userCookie) => {
         WHERE wp.id = '${id}'
       )
       SELECT 
-          JSON_OBJECT(
-          "user_feed_cnt", COUNT(wp.id)
-        ) as user_feed_cnt,
-        JSON_ARRAYAGG(
-          JSON_OBJECT(
+        COUNT(wp.id)+1 as user_feed_cnt,
+        CONCAT(
+        	'[',
+        	GROUP_CONCAT(
+	          JSON_OBJECT(
                 "id", wp.id,
                 "title", wp.title,
-                "img_url", a.img_url
-              )
+                "img_url", a.img_url,
+                "created_at", a.created_at
+              ) order by wp.id DESC  
+	        ),
+          ']'
         ) as more_feed
       from Works_Posting wp   
       left JOIN tables1 a on a.id = wp.id 
       left join tables2 b on b.user_id = wp.user_id 
-      WHERE wp.user_id = b.user_id
+      WHERE wp.user_id = b.user_id and NOT wp.id = '${id}'
       `
     );
     moreFeedinfo = [...moreFeedinfo].map(item => {
@@ -170,40 +218,54 @@ const feed = async (id, user_id, userCookie) => {
       `
     );
 
-    // const followerCnt = await myDataSource.query(
-    //   `
-    //   SELECT count(*) from Follow f
-    //   WHERE f.following_id = '${followeeId}'
-    //   `
-    // );
-
     // feed 글쓴이에 대한 팔로워 정보
-    let followInfo = await myDataSource.query(
+    let writerInfo = await myDataSource.query(
       `
       SELECT
-      u.id, u.login_id, u.kor_name, u.eng_name, u.profile_image, u.nickname,  
-      JSON_OBJECT(
-        "follower_cnt", COUNT(f.follower_id)
-      ) as follower_cnt,
-      JSON_ARRAYAGG(
-        JSON_OBJECT(
+        wp.id, u.id as id, u.login_id login_id, u.kor_name kor_name, 
+        u.eng_name eng_name, u.profile_image profile_image, u.nickname nickname,  
+        COUNT(f.follower_id) as follower_cnt,
+        JSON_ARRAYAGG(
+          JSON_OBJECT(
           "follower_id", f.follower_id,
-          "follwer_name", u2.nickname
-        )
-      ) as followerInfo
-      from Works_Posting wp
-      right join Users u on u.id = wp.user_id
-  	  RIGHT join Follow f on f.following_id = u.id  
-      left join Users u2 on u2.id = f.follower_id
-      where wp.id = '${id}'
+          "follower_name", u2.nickname
+          )
+        ) as follower_list,
+        ( 
+          SELECT COUNT(f.following_id)		
+          from Works_Posting wp
+          left join Users u on u.id = wp.user_id  
+          left join Follow f on f.follower_id = u.id 
+          left join Users u2 on u2.id = f.following_id 
+          WHERE wp.id = '${id}'
+        ) as following_cnt,
+        ( 
+        SELECT 
+          JSON_ARRAYAGG(
+            JSON_OBJECT(
+            "following_id", f.following_id,
+            "following_name", u2.nickname
+            )
+          )
+        from Works_Posting wp
+        left join Users u on u.id = wp.user_id  
+        left join Follow f on f.follower_id = u.id 
+        left join Users u2 on u2.id = f.following_id 
+        WHERE wp.id = '${id}'
+        ) as following_list
+        from Works_Posting wp
+        left join Users u on u.id = wp.user_id
+        left join Follow f on f.following_id = u.id  
+        left join Users u2 on u2.id = f.follower_id 
+        where wp.id = '${id}'
       `
     );
 
-    followInfo = [...followInfo].map(item => {
+    writerInfo = [...writerInfo].map(item => {
       return {
         ...item,
-        followerCnt: JSON.parse(item.follower_cnt),
-        followerInfo: JSON.parse(item.followerInfo),
+        follower_list: JSON.parse(item.follower_list),
+        following_list: JSON.parse(item.following_list),
       };
     });
 
@@ -248,7 +310,7 @@ const feed = async (id, user_id, userCookie) => {
       feedCommentInfo,
       moreFeedinfo,
       checkFollow,
-      followInfo,
+      writerInfo,
       sympathyCount,
       sympathySortCount,
       viewCount
@@ -260,33 +322,107 @@ const feed = async (id, user_id, userCookie) => {
   }
 };
 
-// ----------------------------
-// follow 여부 관련
-const isfollow = async (followeeId, user_id) => {
-  const checkFollow = await myDataSource.query(
+// -----------------------------------------------------------------------
+// follow 체결 관련
+const following = async (following_id, user_id) => {
+  const follow = await myDataSource.query(
     `
-    select EXISTS (select id from Follow f  where '${followeeId}' and '${user_id}') as success
-    `
-  );
-
-  const followerCnt = await myDataSource.query(
-    `
-    SELECT count(*) from Follow f 
-    WHERE f.following_id = '${followeeId}'
+    INSERT into Follow (following_id, follower_id) 
+    values ('${following_id}', '${user_id}') 
     `
   );
-
-  let result = { checkFollow, followerCnt };
+  const followingResult = await myDataSource.query(
+    `
+    SELECT * from Follow f 
+    WHERE following_id = '${following_id}' and follower_id = '${user_id}'
+    `
+  );
+  let result = { followingResult };
   return result;
 };
 
-// follow 체결 관련
-const follow = async (followeeId, user_id) => {
-  const checkFollow = await myDataSource.query(
+// follow 취소 관련
+const followingCancel = async (following_id, user_id) => {
+  const deleteFollow = await myDataSource.query(
     `
-    INSERT into Follow (following_id, follower_id) values ('${followeeId}, '${user_id}) 
+    DELETE from Follow 
+    WHERE following_id = '${following_id}' and follower_id = '${user_id}'
     `
   );
+  const deleteResult = await myDataSource.query(
+    `
+    SELECT count(*) from Follow f 
+    WHERE following_id = '${following_id}' and follower_id = '${user_id}'
+    `
+  );
+  let result = { deleteResult };
+  return result;
 };
 
-module.exports = { worksList, feed };
+// 공감
+const sympathy = async (posting_id, user_id, sympathy_id) => {
+  const checkSympathy = await myDataSource.query(
+    `
+    SELECT COUNT(*) check_cnt FROM Works_Sympathy_Count wsc
+    WHERE posting_id = '${posting_id}' and user_id = '${user_id}'
+    `
+  );
+  let checkValue = checkSympathy[0].check_cnt;
+  console.log('checkValue =', checkValue);
+  if (checkValue == 0) {
+    const insertSympathy = await myDataSource.query(
+      `
+      INSERT INTO Works_Sympathy_Count (user_id, posting_id, sympathy_id)
+      VALUES ('${user_id}', '${posting_id}', '${sympathy_id}')
+      `
+    );
+    const result = await myDataSource.query(
+      `
+      SELECT * FROM Works_Sympathy_Count wsc 
+      WHERE user_id = '${user_id}' and posting_id = '${posting_id}'
+      `
+    );
+    return result;
+  } else if (checkValue == 1) {
+    const insertSympathy = await myDataSource.query(
+      `
+      UPDATE Works_Sympathy_Count SET sympathy_id = '${sympathy_id}'
+      WHERE user_id = '${user_id}' and posting_id = '${posting_id}'
+      `
+    );
+    const result = await myDataSource.query(
+      `
+      SELECT * FROM Works_Sympathy_Count wsc 
+      WHERE user_id = '${user_id}' and posting_id = '${posting_id}'
+      `
+    );
+    return result;
+  }
+};
+
+// 공감 취소
+const sympathyCancel = async (posting_id, user_id) => {
+  const deleteSympathy = await myDataSource.query(
+    `
+    DELETE FROM Works_Sympathy_Count 
+    WHERE user_id = '${user_id}' and posting_id = '${posting_id}'
+    `
+  );
+  const checkSympathy = await myDataSource.query(
+    `
+    SELECT COUNT(*) check_cnt FROM Works_Sympathy_Count wsc
+    WHERE posting_id = '${posting_id}' and user_id = '${user_id}'
+    `
+  );
+  let result = { checkSympathy };
+  return result;
+};
+
+module.exports = {
+  worksList,
+  feed,
+  following,
+  followingCancel,
+  sympathy,
+  sympathyCancel,
+};

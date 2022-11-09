@@ -1,4 +1,3 @@
-const { json } = require('express');
 const { DataSource } = require('typeorm');
 const myDataSource = new DataSource({
   type: process.env.TYPEORM_CONNECTION,
@@ -9,9 +8,7 @@ const myDataSource = new DataSource({
   database: process.env.TYPEORM_DATABASE,
 });
 
-myDataSource.initialize().then(() => {
-  console.log('Data Source has been initialized!');
-});
+myDataSource.initialize();
 
 // 최신 feed list
 const feedsList = async () => {

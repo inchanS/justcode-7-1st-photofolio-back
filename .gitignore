@@ -244,4 +244,3 @@ $RECYCLE.BIN/
 /db*
 /config*
 .env
-/db

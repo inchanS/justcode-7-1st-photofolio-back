@@ -27,7 +27,7 @@
     "typeorm": "^0.3.10"
   },
   "dependencies": {
-    "aws-sdk": "^2.1247.0",
+    "aws-sdk": "^2.1248.0",
     "bignumber.js": "^9.1.0",
     "cookie-parser": "^1.4.6",
     "cors": "^2.8.5",
