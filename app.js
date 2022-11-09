@@ -1,8 +1,10 @@
 const express = require('express');
 const cors = require('cors');
 const routes = require('./routes');
-const multer = require('multer');;
+const multer = require('multer');
 const morgan = require('morgan');
+const cookieParser = require('cookie-parser');
+
 
 
 var corsOptions = {
@@ -19,6 +21,7 @@ const createApp = () => {
   app.use(routes);
   app.use(multer);
   app.use(morgan('combined'));
+  app.use(cookieParser())
 
   app.use((err, req, res, next) => {
     const { status, message } = err;

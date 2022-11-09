@@ -16,6 +16,8 @@ const feed = async (req, res) => {
   try {
     const { id } = req.params;
     user_id = req.user_id;
+    const ip = req.headers['x-forwarded-for'] || req.connection.remoteAddress
+    console.log(ip)
     const result = await workService.feed(id, user_id);
     res.status(200).json(result);
   } catch (err) {

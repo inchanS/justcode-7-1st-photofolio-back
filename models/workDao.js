@@ -60,7 +60,7 @@ const worksList = async () => {
 };
 
 // feed 상세
-const feed = async (id, user_id) => {
+const feed = async (id, user_id, userCookie) => {
   try {
     // feed img_url 배열(다수의 이미지가 있을 시)
     let feedImgArr = await myDataSource.query(
@@ -232,6 +232,16 @@ const feed = async (id, user_id) => {
       `
     );
 
+
+    let viewCount = await myDataSource.query(
+      `
+      UPDATE Works_Posting SET view_count = view_count + '1'  WHERE id = '${id}'
+      `
+    );
+
+
+
+
     let result = {
       feedImgArr,
       feedWithTags,
@@ -241,6 +251,7 @@ const feed = async (id, user_id) => {
       followInfo,
       sympathyCount,
       sympathySortCount,
+      viewCount
     };
     return result;
   } catch (err) {
